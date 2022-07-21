@@ -7,7 +7,6 @@ use {
         GeyserPluginError, ReplicaAccountInfo,
     },
     solana_sdk::pubkey::Pubkey,
-    std::time::SystemTime,
 };
 
 impl Eq for DbAccountInfo {}
@@ -118,17 +117,8 @@ pub trait ReadableAccountInfo: Sized {
 impl From<&DbAccountInfo> for accounts::Account {
     fn from(account: &DbAccountInfo) -> Self {
         accounts::Account {
-            pubkey: account.pubkey().to_vec(),
-            owner: account.owner().to_vec(),
-            lamports: account.lamports() as u64,
-            slot: account.slot as u64,
-            executable: account.executable(),
-            rent_epoch: account.rent_epoch() as u64,
             data: account.data().to_vec(),
-            write_version: account.write_version as u64,
-            updated_on: Some(accounts::UnixTimestamp {
-                timestamp: SystemTime::now().elapsed().unwrap().as_secs() as i64,
-            }),
+            ..Default::default()
         }
     }
 }
@@ -148,8 +138,11 @@ impl BufferedBigtableClient {
                 self.pending_account_updates
                     .drain(..)
                     .map(|account| {
+                        let key = format!(
+                            "{}/{:016X}/{:016X}", Pubkey::new(account.pubkey()), !account.slot, !account.write_version
+                        );
                         (
-                            Pubkey::new(account.pubkey()).to_string(),
+                            key,
                             accounts::Account::from(&account),
                         )
                     })
@@ -163,7 +156,7 @@ impl BufferedBigtableClient {
         let client = self.client.lock().unwrap();
         let result = client
             .client
-            .put_protobuf_cells_with_retry::<accounts::Account>("account", &account_cells, true)
+            .put_protobuf_cells_with_retry::<accounts::Account>("account", &account_cells, false)
             .await;
         match result {
             Ok(written_size) => Ok((written_size, raw_size)),
